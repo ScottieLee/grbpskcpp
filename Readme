@@ -1,0 +1,9 @@
+Pure C++ Implementation of turbo coded point to point phy link --- not finished
+
+Use QT Framework for whole project;
+Use Scons for building testing scripts;
+
+Custom minimal blocks are correlate_sync_word, soft_slicer, soft_frame_contor
+
+Other hierblocks are made to make encapsulation for different levels
+
