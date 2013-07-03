@@ -5,6 +5,7 @@
 #include "scrambler.h"
 #include <iostream>
 
+#define VERBOSE 0
 const char packet_utils::preamble[2] = {0xA4, 0xF2};
 const std::string packet_utils::PREAMBLE = std::string((char*)preamble, 2);
 
@@ -14,24 +15,35 @@ const std::string packet_utils::SUFFIX = std::string((char*)suffix, 1);
 const std::string packet_utils::ACCESS_CODE_1_0 = "00000011010001110111011011000111001001110010100010010101101100001111110010111000100010010011100011011000110101110110101001001111";
 const std::string packet_utils::ACCESS_CODE_PACK= string_1_0_to_packed_string(ACCESS_CODE_1_0);
 
+
 packet_utils::packet_utils()
 {
 }
 
-//FIXME!!!! This function changes the input mpdu!!!!!! WHY?
 unsigned int packet_utils::mpdu2ppdu(const std::string& mpdu, std::string& ppdu, short_codec_sptr phy_header_encoder)
 {
     // scrambling
-    std::string mpdu_whitened(mpdu); // Copy
-    scrambler sc;
-    char* mpdu_whitened_ptr = const_cast<char*>(mpdu_whitened.data());
-    for(int v = 0; v < mpdu_whitened.size(); v++){
+    char* mpdu_whitened = new char[mpdu.size() + sizeof(unsigned short)]; // Create a char string which size is length of mpdu plus length of CRC
+    memcpy(mpdu_whitened, mpdu.data(), sizeof(char)*mpdu.size());
+    scrambler sc; // If this is static, the whitenning patterns are different every call.
+                  // If this is non-static, the whitenning patterns are same every call.
+    for(int v = 0; v < mpdu.size(); v++){
         unsigned char next_byte = sc.next_byte();
-        *(mpdu_whitened_ptr + v ) ^= next_byte;
+        *(mpdu_whitened + v ) ^= next_byte;
     }
 
+    // Appending CRC
+    boost::crc_optimal<16, 0x1021, 0xFFFF, 0, false, false> crc_ccitt;
+    crc_ccitt = std::for_each( mpdu_whitened, mpdu_whitened + mpdu.size(), crc_ccitt );
+    unsigned short crc_result = crc_ccitt();
+    memcpy(mpdu_whitened + sizeof(char)*mpdu.size(), &crc_result, sizeof(unsigned short));
+    std::string mpdu_with_CRC = std::string(mpdu_whitened, mpdu_whitened + sizeof(char)*mpdu.size() + sizeof(unsigned short));
+
+    // Channel coding
+    std::string mpdu_coded = mpdu_with_CRC;
+
     // make phy header
-    unsigned int len = mpdu.size(); //Len of Bytes
+    unsigned int len = mpdu_coded.size(); //Len of Bytes
     assert(len < 4096);
     std::vector<bool> mpdu_len(24, 0);  // Use 24 bit representing length
     for (int v = 0; v < 24; v++){
@@ -40,12 +52,14 @@ unsigned int packet_utils::mpdu2ppdu(const std::string& mpdu, std::string& ppdu,
     phy_header_encoder -> load_input(mpdu_len);
     phy_header_encoder -> process();
     std::vector<bool> phy_header_vec = phy_header_encoder -> result();// After header coding, header bit length should be 120.
-//    std::cout << "Phy header vec:" << std::endl;
-//    for (int v = 0; v < phy_header_vec.size(); v++) {
-//        std::cout << phy_header_vec[v] << "\t";
-//    }
+#if VERBOSE
+    std::cout << "Phy header vec:" << std::endl;
+    for (int v = 0; v < phy_header_vec.size(); v++) {
+        std::cout << phy_header_vec[v] << "\t";
+    }
     std::cout << std::endl;
-    assert(phy_header_vec.size() == 120);
+#endif
+    assert(phy_header_vec.size() == 120); // The header must be 120 bit till now.
     std::string phy_header_1_0;
     for(int v = 0; v < phy_header_vec.size(); v++){
         phy_header_1_0 = phy_header_1_0 + (phy_header_vec[v]?"1":"0");
@@ -54,28 +68,51 @@ unsigned int packet_utils::mpdu2ppdu(const std::string& mpdu, std::string& ppdu,
     // Add
     std::string phy_header_pack;
     string_1_0_to_packed_string(phy_header_1_0, phy_header_pack);
-    //std::cout << "MPDU:" << string_to_hex(mpdu) << std::endl;
-    ppdu = PREAMBLE + ACCESS_CODE_PACK + phy_header_pack + mpdu + SUFFIX;
-    //std::cout << "Len = " << ppdu.size()<< std::endl;
-    std::cout << string_to_hex(ppdu) << std::endl;
+    ppdu = PREAMBLE + ACCESS_CODE_PACK + phy_header_pack + mpdu_coded + SUFFIX;
+
+    // Free allocated heap
+    delete[] mpdu_whitened;
 }
 
 
 unsigned int packet_utils::ppdu2mpdu(const std::string& ppdu, std::string& mpdu, bool& ok)
 {
-    std::cout << "Receive Frame!!!" << std::endl;
-    float* ppdu_parser = (float*) ppdu.data();
+    //The ppdu data are soft bits, each bit is a float.
+    float* ppdu_parser = (float*) (ppdu.data()); // Reinterpret cast to float[]
 
     // Decode it!
+    int mpdu_len_with_crc = ppdu.size()/sizeof(float)/8;
+    char* decoded_mpdu = new char[mpdu_len_with_crc];
+    for (int v = 0; v < mpdu_len_with_crc ; v++){
+        decoded_mpdu[v] = 0x00;
+        decoded_mpdu[v] |= ( (*(ppdu_parser + v*8+0)>0 ? 0 : 1) << 7 );
+        decoded_mpdu[v] |= ( (*(ppdu_parser + v*8+1)>0 ? 0 : 1) << 6 );
+        decoded_mpdu[v] |= ( (*(ppdu_parser + v*8+2)>0 ? 0 : 1) << 5 );
+        decoded_mpdu[v] |= ( (*(ppdu_parser + v*8+3)>0 ? 0 : 1) << 4 );
+        decoded_mpdu[v] |= ( (*(ppdu_parser + v*8+4)>0 ? 0 : 1) << 3 );
+        decoded_mpdu[v] |= ( (*(ppdu_parser + v*8+5)>0 ? 0 : 1) << 2 );
+        decoded_mpdu[v] |= ( (*(ppdu_parser + v*8+6)>0 ? 0 : 1) << 1 );
+        decoded_mpdu[v] |= ( (*(ppdu_parser + v*8+7)>0 ? 0 : 1));
+    }
 
-    // Dewhiten it !
+
 
     // CRC check!!
-    for (int v = 0; v < ppdu.size()/sizeof(float); v++){
-        std::cout << (*(ppdu_parser + v)>0? 0 : 1) << "\t";
+    boost::crc_optimal<16, 0x1021, 0xFFFF, 0, false, false> crc_ccitt;
+    crc_ccitt = std::for_each( decoded_mpdu, decoded_mpdu + mpdu_len_with_crc - sizeof(short), crc_ccitt );
+    unsigned short crc_result = crc_ccitt();
+    unsigned short rev_crc;
+    memcpy(&rev_crc, decoded_mpdu + mpdu_len_with_crc - sizeof(short), sizeof(short));
+    ok =(rev_crc == crc_result) ? true : false;
+    // Dewhiten it !
+    scrambler sc; // If this is static, the whitenning patterns are different every call.
+                  // If this is non-static, the whitenning patterns are same every call.
+    for(int v = 0; v < mpdu_len_with_crc; v++){
+        unsigned char next_byte = sc.next_byte();
+        *(decoded_mpdu + v ) ^= next_byte;
     }
-    std::cout << std::endl;
-    std::cout << ppdu.size()<< std::endl;
+    // Give mpdu
+    mpdu = std::string(decoded_mpdu, decoded_mpdu + mpdu_len_with_crc - sizeof(short));
 }
 
 //unsigned int packet_utils::make_packet(const std::string &mpdu, std::string &ppdu, )

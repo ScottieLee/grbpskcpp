@@ -33,7 +33,7 @@ void microsleep(long us)
 
 void callback1(bool ok, std::string mpdu, timeval lt_timeval)
 {
-    std::cout << "Callback function!!!" << std::endl;
+    std::cout << "Ok = " << ok << "\t" << string_to_hex(mpdu) << std::endl;
 }
 
 int main(int argc, char *argv[])
@@ -42,16 +42,16 @@ int main(int argc, char *argv[])
     top_block_simulation_sptr tb = make_top_block_simulation_sptr();
     gr_rt_status_t r = gr_enable_realtime_scheduling(); //FIXME
     //----------------------Start USRP----------------------//
-    char tmp[1] = {0x12};
-    std::string payload = std::string(tmp, sizeof(char));
-    payload = repeat(payload, 10);
-    std::cout << string_to_hex(payload) << std::endl;
-
     tb->start();
-    tb->send_pkt(payload, 0);
-    tb->send_pkt(payload, 0);
-    tb->wait();
+    char a = 0x00;
+    while (1) {
 
+        char tmp[1] = {a};
+        a++;
+        std::string payload = std::string(tmp, sizeof(char));
+        payload = repeat(payload, 10);
+        tb->send_pkt(payload, 0);
+    }
  //   QCoreApplication a(argc, argv);
  //   return a.exec();
 }

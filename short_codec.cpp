@@ -24,7 +24,6 @@ repetition_encoder::repetition_encoder(int repetition_factor): short_encoder(), 
 bool repetition_encoder::process()
 {
     std::vector<bool>  input_buf  = get_encode_buf();
-    //std::cout << "Input_buf.size is " << input_buf.size() << std::endl;
     std::vector<bool>& output_buf = get_outbuf();
     output_buf.clear();
     for (int v = 0; v < d_repetition_factor; v++) {
@@ -49,7 +48,6 @@ bool repetition_decoder::process()
     output_buf.clear();
     size_t out_size = input_buf.size()/d_repetition_factor;
     std::vector<float> tmp(out_size, 0);
-    std::cout << std::endl;
     for (int v = 0; v < d_repetition_factor; v++) {
         for (int w = 0; w < out_size; w++)
         {

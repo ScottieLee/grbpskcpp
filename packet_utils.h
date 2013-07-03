@@ -2,6 +2,10 @@
 #define PACKET_UTILS_H
 #include <string>
 #include "short_codec.h"
+#include <boost/crc.hpp>
+#include <boost/cstdint.hpp> //For boost CRC
+#include <algorithm> //For std::for_each in CRC calculation
+
 
 class packet_utils
 {
